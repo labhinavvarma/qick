@@ -1,159 +1,112 @@
 """
-Memory Extractor Module
-Extracts semantic, episodic, and procedural memories from movie scripts
+Clear and structured prompts for memory extraction
 """
 
-import json
-from typing import Dict, Any
-from llm_client import SFAssistClient
-import prompts
+SEMANTIC_MEMORY_PROMPT = """Analyze the following movie script and extract SEMANTIC MEMORY.
 
+Semantic memory includes general knowledge and facts about the movie world.
 
-class MemoryExtractor:
-    """Extracts different types of memories from movie scripts"""
-    
-    def __init__(self, llm_client: SFAssistClient):
-        self.llm = llm_client
-    
-    def extract_semantic_memory(self, script: str) -> Dict[str, Any]:
-        """
-        Extract semantic memory from movie script
-        
-        Args:
-            script: The movie script text
-        
-        Returns:
-            Dictionary containing semantic memory
-        """
-        prompt = prompts.SEMANTIC_MEMORY_PROMPT.format(script=script)
-        
-        try:
-            result = self.llm.generate_json(
-                prompt=prompt,
-                system_message="You are an expert at extracting semantic information. Return only valid JSON."
-            )
-            return result
-        except Exception as e:
-            # Return default structure if extraction fails
-            return {
-                "facts": [f"Error extracting semantic memory: {str(e)}"],
-                "concepts": [],
-                "character_traits": {},
-                "world_building": []
-            }
-    
-    def extract_episodic_memory(self, script: str) -> Dict[str, Any]:
-        """
-        Extract episodic memory from movie script
-        
-        Args:
-            script: The movie script text
-        
-        Returns:
-            Dictionary containing episodic memory
-        """
-        prompt = prompts.EPISODIC_MEMORY_PROMPT.format(script=script)
-        
-        try:
-            result = self.llm.generate_json(
-                prompt=prompt,
-                system_message="You are an expert at extracting episodic information. Return only valid JSON."
-            )
-            return result
-        except Exception as e:
-            # Return default structure if extraction fails
-            return {
-                "scenes": [],
-                "timeline": [f"Error extracting episodic memory: {str(e)}"],
-                "key_moments": [],
-                "plot_points": []
-            }
-    
-    def extract_procedural_memory(self, script: str) -> Dict[str, Any]:
-        """
-        Extract procedural memory from movie script
-        
-        Args:
-            script: The movie script text
-        
-        Returns:
-            Dictionary containing procedural memory
-        """
-        prompt = prompts.PROCEDURAL_MEMORY_PROMPT.format(script=script)
-        
-        try:
-            result = self.llm.generate_json(
-                prompt=prompt,
-                system_message="You are an expert at extracting procedural information. Return only valid JSON."
-            )
-            return result
-        except Exception as e:
-            # Return default structure if extraction fails
-            return {
-                "skills_demonstrated": [f"Error extracting procedural memory: {str(e)}"],
-                "processes": [],
-                "rules_and_protocols": []
-            }
-    
-    def extract_all_memories(self, script: str, progress_callback=None) -> Dict[str, Any]:
-        """
-        Extract all three types of memories from movie script
-        
-        Args:
-            script: The movie script text
-            progress_callback: Optional callback function to report progress
-        
-        Returns:
-            Dictionary containing all memories
-        """
-        memories = {
-            "semantic_memory": {},
-            "episodic_memory": {},
-            "procedural_memory": {}
-        }
-        
-        # Extract semantic memory
-        if progress_callback:
-            progress_callback("Extracting semantic memory...", 33)
-        memories["semantic_memory"] = self.extract_semantic_memory(script)
-        
-        # Extract episodic memory
-        if progress_callback:
-            progress_callback("Extracting episodic memory...", 66)
-        memories["episodic_memory"] = self.extract_episodic_memory(script)
-        
-        # Extract procedural memory
-        if progress_callback:
-            progress_callback("Extracting procedural memory...", 100)
-        memories["procedural_memory"] = self.extract_procedural_memory(script)
-        
-        return memories
-    
-    def save_memories_to_json(self, memories: Dict[str, Any], filename: str) -> str:
-        """
-        Save memories to a JSON file
-        
-        Args:
-            memories: The memories dictionary
-            filename: Output filename
-        
-        Returns:
-            Path to the saved file
-        """
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(memories, f, indent=2, ensure_ascii=False)
-        
-        return filename
-    
-    def load_memories_from_json(self, filename: str) -> Dict[str, Any]:
-        """
-        Load memories from a JSON file
-        
-        Args:
-            filename: Input filename
-        
-        Returns:
-            Memories dictionary
-        """
-        with open(filename, 'r', encoding='utf-8') as f:
-            return json.load(f)
+Extract the following information in JSON format:
+
+{
+  "facts": [
+    "List of general facts about the movie world, setting, time period",
+    "Example: 'The movie is set in 1970s Formula 1 racing'"
+  ],
+  "concepts": [
+    "Key themes and concepts explored in the movie",
+    "Example: 'Rivalry', 'Redemption', 'Determination'"
+  ],
+  "character_traits": {
+    "Character Name": ["trait1", "trait2", "trait3"],
+    "Example format for each main character"
+  },
+  "world_building": [
+    "Details about the setting, culture, time period, locations",
+    "Example: 'European racing circuits in the 1970s'"
+  ]
+}
+
+Movie Script:
+{script}
+
+Return ONLY the JSON object, no additional text or explanation."""
+
+EPISODIC_MEMORY_PROMPT = """Analyze the following movie script and extract EPISODIC MEMORY.
+
+Episodic memory includes specific events, scenes, and the timeline of the story.
+
+Extract the following information in JSON format:
+
+{
+  "scenes": [
+    {
+      "scene_number": "1",
+      "location": "Location name",
+      "description": "What happens in this scene"
+    }
+  ],
+  "timeline": [
+    "Event 1 - Brief description",
+    "Event 2 - Brief description",
+    "List all major events in chronological order"
+  ],
+  "key_moments": [
+    "Pivotal moment 1 that changes the story",
+    "Pivotal moment 2 that affects characters"
+  ],
+  "plot_points": [
+    "Main plot point 1",
+    "Main plot point 2",
+    "Story beats that drive the narrative forward"
+  ]
+}
+
+Movie Script:
+{script}
+
+Return ONLY the JSON object, no additional text or explanation."""
+
+PROCEDURAL_MEMORY_PROMPT = """Analyze the following movie script and extract PROCEDURAL MEMORY.
+
+Procedural memory includes how things are done, skills demonstrated, and processes shown.
+
+Extract the following information in JSON format:
+
+{
+  "skills_demonstrated": [
+    "Specific skills shown by characters",
+    "Example: 'Formula 1 race car driving', 'Pit crew coordination'"
+  ],
+  "processes": [
+    "Step-by-step processes or methods shown",
+    "Example: 'Pre-race car setup: 1) Check tire pressure 2) Adjust wing angles'"
+  ],
+  "rules_and_protocols": [
+    "Rules, protocols, or procedures in the movie world",
+    "Example: 'F1 safety regulations', 'Radio communication protocols'"
+  ]
+}
+
+Movie Script:
+{script}
+
+Return ONLY the JSON object, no additional text or explanation."""
+
+CHATBOT_PROMPT_TEMPLATE = """You are a movie expert assistant. Answer the user's question using the context provided below.
+
+MOVIE SCRIPT CONTEXT:
+{script_context}
+
+SEMANTIC MEMORY (Facts, Concepts, Characters):
+{semantic_memory}
+
+EPISODIC MEMORY (Scenes, Timeline, Events):
+{episodic_memory}
+
+PROCEDURAL MEMORY (Skills, Processes, Rules):
+{procedural_memory}
+
+USER QUESTION: {question}
+
+Provide a detailed and accurate answer based on the context above. Reference specific information from the memories when relevant."""
