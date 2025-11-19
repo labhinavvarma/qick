@@ -1,112 +1,75 @@
 """
-Clear and structured prompts for memory extraction
+Chatbot Module
+Answers questions about movies using extracted memories and script context
 """
 
-SEMANTIC_MEMORY_PROMPT = """Analyze the following movie script and extract SEMANTIC MEMORY.
+import json
+from typing import Dict, Any, List, Tuple
+from llm_client import SFAssistClient
+import prompts
 
-Semantic memory includes general knowledge and facts about the movie world.
 
-Extract the following information in JSON format:
-
-{
-  "facts": [
-    "List of general facts about the movie world, setting, time period",
-    "Example: 'The movie is set in 1970s Formula 1 racing'"
-  ],
-  "concepts": [
-    "Key themes and concepts explored in the movie",
-    "Example: 'Rivalry', 'Redemption', 'Determination'"
-  ],
-  "character_traits": {
-    "Character Name": ["trait1", "trait2", "trait3"],
-    "Example format for each main character"
-  },
-  "world_building": [
-    "Details about the setting, culture, time period, locations",
-    "Example: 'European racing circuits in the 1970s'"
-  ]
-}
-
-Movie Script:
-{script}
-
-Return ONLY the JSON object, no additional text or explanation."""
-
-EPISODIC_MEMORY_PROMPT = """Analyze the following movie script and extract EPISODIC MEMORY.
-
-Episodic memory includes specific events, scenes, and the timeline of the story.
-
-Extract the following information in JSON format:
-
-{
-  "scenes": [
-    {
-      "scene_number": "1",
-      "location": "Location name",
-      "description": "What happens in this scene"
-    }
-  ],
-  "timeline": [
-    "Event 1 - Brief description",
-    "Event 2 - Brief description",
-    "List all major events in chronological order"
-  ],
-  "key_moments": [
-    "Pivotal moment 1 that changes the story",
-    "Pivotal moment 2 that affects characters"
-  ],
-  "plot_points": [
-    "Main plot point 1",
-    "Main plot point 2",
-    "Story beats that drive the narrative forward"
-  ]
-}
-
-Movie Script:
-{script}
-
-Return ONLY the JSON object, no additional text or explanation."""
-
-PROCEDURAL_MEMORY_PROMPT = """Analyze the following movie script and extract PROCEDURAL MEMORY.
-
-Procedural memory includes how things are done, skills demonstrated, and processes shown.
-
-Extract the following information in JSON format:
-
-{
-  "skills_demonstrated": [
-    "Specific skills shown by characters",
-    "Example: 'Formula 1 race car driving', 'Pit crew coordination'"
-  ],
-  "processes": [
-    "Step-by-step processes or methods shown",
-    "Example: 'Pre-race car setup: 1) Check tire pressure 2) Adjust wing angles'"
-  ],
-  "rules_and_protocols": [
-    "Rules, protocols, or procedures in the movie world",
-    "Example: 'F1 safety regulations', 'Radio communication protocols'"
-  ]
-}
-
-Movie Script:
-{script}
-
-Return ONLY the JSON object, no additional text or explanation."""
-
-CHATBOT_PROMPT_TEMPLATE = """You are a movie expert assistant. Answer the user's question using the context provided below.
-
-MOVIE SCRIPT CONTEXT:
-{script_context}
-
-SEMANTIC MEMORY (Facts, Concepts, Characters):
-{semantic_memory}
-
-EPISODIC MEMORY (Scenes, Timeline, Events):
-{episodic_memory}
-
-PROCEDURAL MEMORY (Skills, Processes, Rules):
-{procedural_memory}
-
-USER QUESTION: {question}
-
-Provide a detailed and accurate answer based on the context above. Reference specific information from the memories when relevant."""
+class MovieChatbot:
+    """Chatbot for answering questions about movies"""
+    
+    def __init__(self, llm_client: SFAssistClient):
+        self.llm = llm_client
+        self.script_context = ""
+        self.memories = {}
+        self.chat_history: List[Tuple[str, str]] = []
+    
+    def set_context(self, script: str, memories: Dict[str, Any]):
+        """
+        Set the context for the chatbot
+        
+        Args:
+            script: The movie script (will be truncated if too long)
+            memories: The extracted memories dictionary
+        """
+        # Store first 3000 characters of script as context
+        self.script_context = script[:3000]
+        self.memories = memories
+    
+    def ask(self, question: str) -> str:
+        """
+        Ask a question about the movie
+        
+        Args:
+            question: User's question
+        
+        Returns:
+            The chatbot's answer
+        """
+        if not self.memories:
+            return "Please upload and process a movie script first."
+        
+        # Build the context prompt
+        prompt = prompts.CHATBOT_PROMPT_TEMPLATE.format(
+            script_context=self.script_context,
+            semantic_memory=json.dumps(self.memories.get("semantic_memory", {}), indent=2),
+            episodic_memory=json.dumps(self.memories.get("episodic_memory", {}), indent=2),
+            procedural_memory=json.dumps(self.memories.get("procedural_memory", {}), indent=2),
+            question=question
+        )
+        
+        try:
+            answer = self.llm.generate(
+                prompt=prompt,
+                system_message="You are a knowledgeable movie assistant. Answer accurately using the provided context."
+            )
+            
+            # Store in chat history
+            self.chat_history.append((question, answer))
+            
+            return answer
+        
+        except Exception as e:
+            return f"Error generating answer: {str(e)}"
+    
+    def get_chat_history(self) -> List[Tuple[str, str]]:
+        """Get the chat history"""
+        return self.chat_history
+    
+    def clear_history(self):
+        """Clear the chat history"""
+        self.chat_history = []
