@@ -1,206 +1,329 @@
 """
-Memory Extractor Module
-Extracts semantic, episodic, and procedural memories from movie scripts
+Movie Memory Extractor - Streamlit Application
+Main application file with UI
 """
 
+import streamlit as st
 import json
-from typing import Dict, Any
+import pandas as pd
+from io import StringIO
+
+# Import our modules
+import config
 from llm_client import SFAssistClient
-import prompts
+from memory_extractor import MemoryExtractor
+from chatbot import MovieChatbot
 
 
-class MemoryExtractor:
-    """Extracts different types of memories from movie scripts"""
+# === Page Configuration ===
+st.set_page_config(
+    page_title=config.APP_TITLE,
+    page_icon=config.APP_ICON,
+    layout="wide"
+)
+
+# === Initialize Session State ===
+if "memories" not in st.session_state:
+    st.session_state.memories = None
+
+if "script_text" not in st.session_state:
+    st.session_state.script_text = None
+
+if "chatbot" not in st.session_state:
+    st.session_state.chatbot = None
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+if "extraction_complete" not in st.session_state:
+    st.session_state.extraction_complete = False
+
+
+# === Initialize LLM Client ===
+@st.cache_resource
+def get_llm_client():
+    """Initialize and cache the LLM client"""
+    return SFAssistClient(
+        api_url=config.API_URL,
+        api_key=config.API_KEY,
+        app_id=config.APP_ID,
+        aplctn_cd=config.APLCTN_CD,
+        model=config.MODEL
+    )
+
+
+# === Helper Functions ===
+def display_semantic_memory(semantic_mem):
+    """Display semantic memory in a structured format"""
+    st.subheader("🧠 Semantic Memory")
     
-    def __init__(self, llm_client: SFAssistClient):
-        self.llm = llm_client
+    col1, col2 = st.columns(2)
     
-    def extract_semantic_memory(self, script: str) -> Dict[str, Any]:
-        """
-        Extract semantic memory from movie script
+    with col1:
+        st.markdown("**📌 Facts:**")
+        if semantic_mem.get("facts"):
+            for fact in semantic_mem["facts"]:
+                st.markdown(f"- {fact}")
         
-        Args:
-            script: The movie script text
+        st.markdown("**💡 Concepts:**")
+        if semantic_mem.get("concepts"):
+            for concept in semantic_mem["concepts"]:
+                st.markdown(f"- {concept}")
+    
+    with col2:
+        st.markdown("**👥 Character Traits:**")
+        if semantic_mem.get("character_traits"):
+            for char, traits in semantic_mem["character_traits"].items():
+                st.markdown(f"**{char}:** {', '.join(traits)}")
         
-        Returns:
-            Dictionary containing semantic memory
-        """
-        # Limit script length to avoid token issues
-        script_preview = script[:8000] if len(script) > 8000 else script
+        st.markdown("**🌍 World Building:**")
+        if semantic_mem.get("world_building"):
+            for wb in semantic_mem["world_building"]:
+                st.markdown(f"- {wb}")
+
+
+def display_episodic_memory(episodic_mem):
+    """Display episodic memory in a structured format"""
+    st.subheader("📖 Episodic Memory")
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["Scenes", "Timeline", "Key Moments", "Plot Points"])
+    
+    with tab1:
+        if episodic_mem.get("scenes"):
+            scenes_df = pd.DataFrame(episodic_mem["scenes"])
+            st.dataframe(scenes_df, use_container_width=True)
+        else:
+            st.info("No scenes extracted")
+    
+    with tab2:
+        if episodic_mem.get("timeline"):
+            for i, event in enumerate(episodic_mem["timeline"], 1):
+                st.markdown(f"**{i}.** {event}")
+        else:
+            st.info("No timeline extracted")
+    
+    with tab3:
+        if episodic_mem.get("key_moments"):
+            for moment in episodic_mem["key_moments"]:
+                st.markdown(f"⭐ {moment}")
+        else:
+            st.info("No key moments extracted")
+    
+    with tab4:
+        if episodic_mem.get("plot_points"):
+            for point in episodic_mem["plot_points"]:
+                st.markdown(f"📍 {point}")
+        else:
+            st.info("No plot points extracted")
+
+
+def display_procedural_memory(procedural_mem):
+    """Display procedural memory in a structured format"""
+    st.subheader("⚙️ Procedural Memory")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**🎯 Skills Demonstrated:**")
+        if procedural_mem.get("skills_demonstrated"):
+            for skill in procedural_mem["skills_demonstrated"]:
+                st.markdown(f"- {skill}")
+        else:
+            st.info("No skills extracted")
+    
+    with col2:
+        st.markdown("**🔄 Processes:**")
+        if procedural_mem.get("processes"):
+            for process in procedural_mem["processes"]:
+                st.markdown(f"- {process}")
+        else:
+            st.info("No processes extracted")
+    
+    with col3:
+        st.markdown("**📋 Rules & Protocols:**")
+        if procedural_mem.get("rules_and_protocols"):
+            for rule in procedural_mem["rules_and_protocols"]:
+                st.markdown(f"- {rule}")
+        else:
+            st.info("No rules extracted")
+
+
+# === Main Application ===
+def main():
+    st.title(config.APP_TITLE)
+    st.markdown("Upload a movie script to extract semantic, episodic, and procedural memories!")
+    
+    # Sidebar for file upload
+    with st.sidebar:
+        st.header("📤 Upload Movie Script")
         
-        prompt = prompts.SEMANTIC_MEMORY_PROMPT.format(script=script_preview)
+        uploaded_file = st.file_uploader(
+            "Choose a text file",
+            type=["txt"],
+            help="Upload a movie script in .txt format"
+        )
         
-        try:
-            result = self.llm.generate_json(
-                prompt=prompt,
-                system_message="Extract semantic memory as valid JSON. Return only JSON, nothing else."
+        if uploaded_file is not None:
+            # Read the script
+            stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
+            script_text = stringio.read()
+            
+            st.success(f"✅ File loaded: {uploaded_file.name}")
+            st.info(f"📄 Length: {len(script_text):,} characters")
+            
+            # Show chunking info
+            chunk_size = 6000
+            num_chunks = max(1, (len(script_text) + chunk_size - 1) // chunk_size)
+            if num_chunks > 1:
+                st.warning(f"⚠️ Large script will be processed in {num_chunks} chunks")
+            
+            # Check length
+            if len(script_text) > config.MAX_SCRIPT_LENGTH:
+                st.warning(f"⚠️ Script is very long. Using first {config.MAX_SCRIPT_LENGTH:,} characters.")
+                script_text = script_text[:config.MAX_SCRIPT_LENGTH]
+            
+            # Store in session state
+            st.session_state.script_text = script_text
+            
+            # Extract button
+            if st.button("🚀 Extract Memories", use_container_width=True, type="primary"):
+                # Calculate estimated time
+                chunk_size = 6000
+                num_chunks = max(1, (len(script_text) + chunk_size - 1) // chunk_size)
+                estimated_time = num_chunks * 3 * 20  # 3 memory types, ~20 sec per chunk
+                
+                st.info(f"⏱️ Estimated time: {estimated_time // 60} min {estimated_time % 60} sec")
+                
+                with st.spinner("Extracting memories... This may take several minutes for large scripts..."):
+                    try:
+                        # Initialize components
+                        llm_client = get_llm_client()
+                        extractor = MemoryExtractor(llm_client)
+                        
+                        # Progress tracking
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        def update_progress(message, percent):
+                            status_text.text(message)
+                            progress_bar.progress(percent / 100)
+                        
+                        # Extract memories
+                        memories = extractor.extract_all_memories(
+                            script_text,
+                            progress_callback=update_progress
+                        )
+                        
+                        # Store in session state
+                        st.session_state.memories = memories
+                        st.session_state.extraction_complete = True
+                        
+                        # Initialize chatbot
+                        chatbot = MovieChatbot(llm_client)
+                        chatbot.set_context(script_text, memories)
+                        st.session_state.chatbot = chatbot
+                        
+                        # Save to JSON
+                        json_filename = "movie_memories.json"
+                        extractor.save_memories_to_json(memories, json_filename)
+                        
+                        progress_bar.progress(100)
+                        status_text.text("✅ Extraction complete!")
+                        st.success("🎉 Memories extracted successfully!")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error during extraction: {str(e)}")
+        
+        # Download JSON button
+        if st.session_state.memories:
+            st.divider()
+            json_str = json.dumps(st.session_state.memories, indent=2)
+            st.download_button(
+                label="💾 Download Memories JSON",
+                data=json_str,
+                file_name="movie_memories.json",
+                mime="application/json",
+                use_container_width=True
             )
-            
-            # Validate required fields
-            if not isinstance(result, dict):
-                raise ValueError("Result is not a dictionary")
-            
-            # Ensure all required fields exist
-            result.setdefault("facts", [])
-            result.setdefault("concepts", [])
-            result.setdefault("character_traits", {})
-            result.setdefault("world_building", [])
-            
-            return result
-            
-        except Exception as e:
-            print(f"Error in semantic memory extraction: {str(e)}")
-            # Return default structure with error info
-            return {
-                "facts": [f"Extraction failed: {str(e)[:200]}"],
-                "concepts": ["Error during extraction"],
-                "character_traits": {},
-                "world_building": []
-            }
     
-    def extract_episodic_memory(self, script: str) -> Dict[str, Any]:
-        """
-        Extract episodic memory from movie script
+    # Main content area
+    if st.session_state.extraction_complete and st.session_state.memories:
         
-        Args:
-            script: The movie script text
+        # Create tabs for different views
+        tab1, tab2, tab3 = st.tabs(["📊 Memory Tables", "💬 Chatbot", "📄 Raw JSON"])
         
-        Returns:
-            Dictionary containing episodic memory
-        """
-        # Limit script length to avoid token issues
-        script_preview = script[:8000] if len(script) > 8000 else script
+        with tab1:
+            st.header("Extracted Memories")
+            
+            # Display all memories
+            display_semantic_memory(st.session_state.memories.get("semantic_memory", {}))
+            st.divider()
+            display_episodic_memory(st.session_state.memories.get("episodic_memory", {}))
+            st.divider()
+            display_procedural_memory(st.session_state.memories.get("procedural_memory", {}))
         
-        prompt = prompts.EPISODIC_MEMORY_PROMPT.format(script=script_preview)
+        with tab2:
+            st.header("🤖 Movie Chatbot")
+            st.markdown("Ask questions about the movie using the extracted memories!")
+            
+            # Chat history display
+            chat_container = st.container()
+            
+            # Display chat history
+            with chat_container:
+                if st.session_state.chatbot and st.session_state.chatbot.chat_history:
+                    for question, answer in st.session_state.chatbot.chat_history:
+                        with st.chat_message("user"):
+                            st.write(question)
+                        with st.chat_message("assistant"):
+                            st.write(answer)
+            
+            # Clear chat button
+            if st.button("🗑️ Clear Chat History"):
+                st.session_state.chatbot.clear_history()
+                st.rerun()
         
-        try:
-            result = self.llm.generate_json(
-                prompt=prompt,
-                system_message="Extract episodic memory as valid JSON. Return only JSON, nothing else."
-            )
-            
-            # Validate required fields
-            if not isinstance(result, dict):
-                raise ValueError("Result is not a dictionary")
-            
-            # Ensure all required fields exist
-            result.setdefault("scenes", [])
-            result.setdefault("timeline", [])
-            result.setdefault("key_moments", [])
-            result.setdefault("plot_points", [])
-            
-            return result
-            
-        except Exception as e:
-            print(f"Error in episodic memory extraction: {str(e)}")
-            # Return default structure with error info
-            return {
-                "scenes": [],
-                "timeline": [f"Extraction failed: {str(e)[:200]}"],
-                "key_moments": [],
-                "plot_points": []
-            }
+        with tab3:
+            st.header("Raw JSON Output")
+            st.json(st.session_state.memories)
     
-    def extract_procedural_memory(self, script: str) -> Dict[str, Any]:
-        """
-        Extract procedural memory from movie script
+    # Chat input OUTSIDE tabs (Streamlit requirement)
+    if st.session_state.extraction_complete and st.session_state.memories:
+        st.divider()
+        question = st.chat_input("💬 Ask a question about the movie...")
         
-        Args:
-            script: The movie script text
-        
-        Returns:
-            Dictionary containing procedural memory
-        """
-        # Limit script length to avoid token issues
-        script_preview = script[:8000] if len(script) > 8000 else script
-        
-        prompt = prompts.PROCEDURAL_MEMORY_PROMPT.format(script=script_preview)
-        
-        try:
-            result = self.llm.generate_json(
-                prompt=prompt,
-                system_message="Extract procedural memory as valid JSON. Return only JSON, nothing else."
-            )
+        if question:
+            # Add to chatbot and get response
+            with st.spinner("🤔 Thinking..."):
+                answer = st.session_state.chatbot.ask(question)
             
-            # Validate required fields
-            if not isinstance(result, dict):
-                raise ValueError("Result is not a dictionary")
-            
-            # Ensure all required fields exist
-            result.setdefault("skills_demonstrated", [])
-            result.setdefault("processes", [])
-            result.setdefault("rules_and_protocols", [])
-            
-            return result
-            
-        except Exception as e:
-            print(f"Error in procedural memory extraction: {str(e)}")
-            # Return default structure with error info
-            return {
-                "skills_demonstrated": [f"Extraction failed: {str(e)[:200]}"],
-                "processes": [],
-                "rules_and_protocols": []
-            }
+            # Rerun to show the new message
+            st.rerun()
     
-    def extract_all_memories(self, script: str, progress_callback=None) -> Dict[str, Any]:
-        """
-        Extract all three types of memories from movie script
+    else:
+        # Welcome message
+        st.info("👈 Upload a movie script from the sidebar to get started!")
         
-        Args:
-            script: The movie script text
-            progress_callback: Optional callback function to report progress
+        st.markdown("""
+        ### How it works:
         
-        Returns:
-            Dictionary containing all memories
-        """
-        memories = {
-            "semantic_memory": {},
-            "episodic_memory": {},
-            "procedural_memory": {}
-        }
+        1. **Upload** a movie script (.txt file) using the sidebar
+        2. **Extract** three types of memories:
+           - 🧠 **Semantic Memory**: Facts, concepts, character traits, world-building
+           - 📖 **Episodic Memory**: Scenes, timeline, key moments, plot points
+           - ⚙️ **Procedural Memory**: Skills, processes, rules demonstrated
+        3. **View** the extracted memories in structured tables
+        4. **Chat** with an AI assistant about the movie using the memories
+        5. **Download** the memories as JSON for later use
         
-        # Extract semantic memory
-        if progress_callback:
-            progress_callback("Extracting semantic memory...", 33)
-        memories["semantic_memory"] = self.extract_semantic_memory(script)
-        
-        # Extract episodic memory
-        if progress_callback:
-            progress_callback("Extracting episodic memory...", 66)
-        memories["episodic_memory"] = self.extract_episodic_memory(script)
-        
-        # Extract procedural memory
-        if progress_callback:
-            progress_callback("Extracting procedural memory...", 100)
-        memories["procedural_memory"] = self.extract_procedural_memory(script)
-        
-        return memories
-    
-    def save_memories_to_json(self, memories: Dict[str, Any], filename: str) -> str:
-        """
-        Save memories to a JSON file
-        
-        Args:
-            memories: The memories dictionary
-            filename: Output filename
-        
-        Returns:
-            Path to the saved file
-        """
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(memories, f, indent=2, ensure_ascii=False)
-        
-        return filename
-    
-    def load_memories_from_json(self, filename: str) -> Dict[str, Any]:
-        """
-        Load memories from a JSON file
-        
-        Args:
-            filename: Input filename
-        
-        Returns:
-            Memories dictionary
-        """
-        with open(filename, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        ### Features:
+        - ✅ Automatic memory extraction using AI
+        - ✅ Structured display in tables
+        - ✅ Interactive chatbot with movie context
+        - ✅ JSON export functionality
+        - ✅ Support for any movie script
+        """)
+
+
+if __name__ == "__main__":
+    main()
