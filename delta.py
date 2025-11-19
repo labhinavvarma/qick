@@ -1,88 +1,146 @@
 """
-Clear and structured prompts for memory extraction
+LLM Client for sfassist API
 """
 
-SEMANTIC_MEMORY_PROMPT = """You are a JSON extraction expert. Extract semantic memory from this movie script.
+import requests
+import json
+import uuid
+import urllib3
+from typing import Dict, Any
 
-IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, no explanations. Just the raw JSON object.
+# Disable SSL warnings for internal environments
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-Extract this exact structure:
-{{
-  "facts": ["fact1", "fact2", "fact3"],
-  "concepts": ["concept1", "concept2"],
-  "character_traits": {{"Character Name": ["trait1", "trait2"]}},
-  "world_building": ["detail1", "detail2"]
-}}
 
-Semantic memory = general knowledge about the movie world
-- facts: General facts about setting, time period, genre
-- concepts: Themes like rivalry, redemption, love
-- character_traits: Main characters and their personality traits
-- world_building: Setting details, locations, culture, time period
-
-Movie Script:
-{script}
-
-Return valid JSON only. Start with {{ and end with }}. No other text.
-
-EPISODIC_MEMORY_PROMPT = """You are a JSON extraction expert. Extract episodic memory from this movie script.
-
-IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, no explanations. Just the raw JSON object.
-
-Extract this exact structure:
-{{
-  "scenes": [{{"scene_number": "1", "location": "Place", "description": "What happens"}}],
-  "timeline": ["Event 1", "Event 2", "Event 3"],
-  "key_moments": ["Pivotal moment 1", "Pivotal moment 2"],
-  "plot_points": ["Plot point 1", "Plot point 2"]
-}}
-
-Episodic memory = specific events and timeline
-- scenes: Individual scenes with number, location, description
-- timeline: Chronological list of major events
-- key_moments: Pivotal moments that change the story
-- plot_points: Main story beats that drive narrative
-
-Movie Script:
-{script}
-
-Return valid JSON only. Start with {{ and end with }}. No other text.
-
-PROCEDURAL_MEMORY_PROMPT = """You are a JSON extraction expert. Extract procedural memory from this movie script.
-
-IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, no explanations. Just the raw JSON object.
-
-Extract this exact structure:
-{{
-  "skills_demonstrated": ["skill1", "skill2", "skill3"],
-  "processes": ["process1", "process2"],
-  "rules_and_protocols": ["rule1", "rule2"]
-}}
-
-Procedural memory = how things are done
-- skills_demonstrated: Specific skills shown by characters
-- processes: Step-by-step methods or procedures shown
-- rules_and_protocols: Rules, regulations, or protocols in the movie
-
-Movie Script:
-{script}
-
-Return valid JSON only. Start with {{ and end with }}. No other text.
-
-CHATBOT_PROMPT_TEMPLATE = """You are a movie expert assistant. Answer the user's question using the context provided below.
-
-MOVIE SCRIPT CONTEXT:
-{script_context}
-
-SEMANTIC MEMORY (Facts, Concepts, Characters):
-{semantic_memory}
-
-EPISODIC MEMORY (Scenes, Timeline, Events):
-{episodic_memory}
-
-PROCEDURAL MEMORY (Skills, Processes, Rules):
-{procedural_memory}
-
-USER QUESTION: {question}
-
-Provide a detailed and accurate answer based on the context above. Reference specific information from the memories when relevant."""
+class SFAssistClient:
+    """Client for interacting with sfassist API"""
+    
+    def __init__(self, api_url: str, api_key: str, app_id: str, aplctn_cd: str, model: str):
+        self.api_url = api_url
+        self.api_key = api_key
+        self.app_id = app_id
+        self.aplctn_cd = aplctn_cd
+        self.model = model
+    
+    def generate(self, prompt: str, system_message: str = "", session_id: str = None) -> str:
+        """
+        Generate a response from the LLM
+        
+        Args:
+            prompt: The user prompt/question
+            system_message: System message for the LLM
+            session_id: Optional session ID
+        
+        Returns:
+            The LLM's response as a string
+        """
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+        
+        # Build payload
+        payload = {
+            "query": {
+                "aplctn_cd": self.aplctn_cd,
+                "app_id": self.app_id,
+                "api_key": self.api_key,
+                "method": "cortex",
+                "model": self.model,
+                "sys_msg": system_message,
+                "limit_convs": "0",
+                "prompt": {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ]
+                },
+                "app_lvl_prefix": "",
+                "user_id": "",
+                "session_id": session_id
+            }
+        }
+        
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json",
+            "Authorization": f'Snowflake Token="{self.api_key}"'
+        }
+        
+        try:
+            response = requests.post(
+                self.api_url,
+                headers=headers,
+                json=payload,
+                verify=False,
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                raw = response.text
+                
+                # Clean the response
+                if "end_of_stream" in raw:
+                    answer, _, _ = raw.partition("end_of_stream")
+                    return answer.strip()
+                else:
+                    return raw.strip()
+            else:
+                raise Exception(f"API Error {response.status_code}: {response.text}")
+        
+        except Exception as e:
+            raise Exception(f"LLM API request failed: {str(e)}")
+    
+    def generate_json(self, prompt: str, system_message: str = "") -> Dict[str, Any]:
+        """
+        Generate a JSON response from the LLM
+        
+        Args:
+            prompt: The user prompt
+            system_message: System message for the LLM
+        
+        Returns:
+            Parsed JSON response as a dictionary
+        """
+        response = self.generate(prompt, system_message)
+        
+        # Clean the response
+        response = response.strip()
+        
+        # Remove markdown code blocks if present
+        if response.startswith("```json"):
+            response = response.replace("```json", "").replace("```", "").strip()
+        elif response.startswith("```"):
+            response = response.replace("```", "").strip()
+        
+        # Try to extract JSON from the response
+        try:
+            # First, try direct parsing
+            return json.loads(response)
+        except json.JSONDecodeError as e:
+            # Try to find JSON in the response
+            start_idx = response.find('{')
+            end_idx = response.rfind('}')
+            
+            if start_idx != -1 and end_idx != -1:
+                json_str = response[start_idx:end_idx+1]
+                
+                # Clean common JSON errors
+                json_str = json_str.replace('\n', '\\n')  # Fix newlines
+                json_str = json_str.replace('\r', '\\r')  # Fix carriage returns
+                json_str = json_str.replace('\t', '\\t')  # Fix tabs
+                
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    # Last attempt - try to fix common issues
+                    # Replace single quotes with double quotes
+                    json_str = json_str.replace("'", '"')
+                    
+                    try:
+                        return json.loads(json_str)
+                    except json.JSONDecodeError:
+                        raise Exception(f"Could not parse JSON. Original error: {str(e)}. Response preview: {response[:500]}")
+            else:
+                raise Exception(f"No valid JSON found in response. Response preview: {response[:500]}")
+              
